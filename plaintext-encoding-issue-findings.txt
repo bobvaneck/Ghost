@@ -1,0 +1,279 @@
+================================================================================
+GHOST NEWSLETTER PLAIN TEXT ENCODING ISSUE - INVESTIGATION FINDINGS
+================================================================================
+Date: 2026-04-24
+Issue: Encoding artifacts (=E2=80=87=CD=8F) and invisible characters in
+       plain text version of Ghost newsletters
+
+================================================================================
+1. WHERE AND HOW PLAIN TEXT IS GENERATED
+================================================================================
+
+Primary File:
+  ghost/core/core/server/services/email-service/EmailRenderer.js
+
+Primary Function:
+  renderBody() - Line 377
+
+Conversion Call:
+  Line 556: const plaintext = htmlToPlaintext.email(html);
+
+Library Used:
+  @tryghost/html-to-plaintext (version 1.0.4)
+  - External package from TryGhost/SDK repository
+  - Wraps the 'html-to-text' npm library with preset configurations
+  - Source: https://github.com/TryGhost/SDK/tree/main/packages/html-to-plaintext
+
+Email Converter Configuration (in @tryghost/html-to-plaintext):
+  const emailSettings = mergeSettings({
+      selectors: [
+          {selector: 'a', options: {hideLinkHrefIfSameAsText: true}},
+          {selector: '.preheader', format: 'skip'}
+      ]
+  });
+
+Flow:
+  1. EmailService.createEmail() initiates email creation
+  2. BatchSendingService orchestrates batch sending
+  3. EmailRenderer.renderBody() called for each segment (free/paid)
+  4. HTML is fully rendered (CSS inlined via 'juice' library)
+  5. htmlToPlaintext.email(html) converts to plain text
+  6. SendingService.send() sends email with both HTML and plaintext
+  7. MailgunEmailProvider.send() sends to Mailgun with both versions
+
+================================================================================
+2. ROOT CAUSE OF ENCODING ARTIFACTS (=E2=80=87=CD=8F)
+================================================================================
+
+SOURCE CODE LOCATION:
+  File: ghost/core/core/server/services/email-service/EmailRenderer.js
+  Line: 1244
+
+  preheaderSpacing: `${'&#8199;&#847; '.repeat(150)}${'&shy; '.repeat(200)} &nbsp;`,
+
+CHARACTERS INVOLVED:
+  +------------+----------+---------------------------+-------------+--------------------+
+  | HTML Entity| Unicode  | Name                      | UTF-8 Bytes | Quoted-Printable   |
+  +------------+----------+---------------------------+-------------+--------------------+
+  | &#8199;    | U+2007   | FIGURE SPACE              | E2 80 87    | =E2=80=87          |
+  | &#847;     | U+034F   | COMBINING GRAPHEME JOINER | CD 8F       | =CD=8F             |
+  | &shy;      | U+00AD   | SOFT HYPHEN               | C2 AD       | =C2=AD             |
+  +------------+----------+---------------------------+-------------+--------------------+
+
+PURPOSE OF PREHEADER SPACING:
+  - Prevents email body text from appearing in email client preview snippets
+  - Gmail and other clients show first ~100 chars of email body in preview
+  - This invisible spacing "pushes" the real content out of the preview area
+  - Introduced in PR #24993 (September 2025)
+
+TEMPLATE LOCATION:
+  File: ghost/core/core/server/services/email-service/email-templates/template.hbs
+  Lines: 11-15
+
+  <span class="preheader">{{preheader}}</span>
+  <!-- SPACING TO AVOID BODY TEXT BEING DUPLICATED IN PREVIEW TEXT -->
+  <div style="display:none; max-height:0; overflow:hidden; mso-hide: all;"
+       aria-hidden="true" role="presentation">
+      {{{preheaderSpacing}}}
+  </div>
+
+WHY THE BUG OCCURS:
+  1. The <span class="preheader"> element IS skipped by html-to-plaintext
+     (configured with selector: '.preheader', format: 'skip')
+
+  2. The <div> containing preheaderSpacing has NO CLASS - only inline CSS
+     (style="display:none" is NOT respected by html-to-text library)
+
+  3. Therefore, all 150 repetitions of &#8199;&#847; (FIGURE SPACE +
+     COMBINING GRAPHEME JOINER) leak into the plain text output
+
+  4. When sent via Mailgun with quoted-printable encoding, these bytes
+     become =E2=80=87=CD=8F repeated 150 times
+
+RELATED TODO IN CODE:
+  Line 553: // TODO: normalizeReplacementStrings (replace unsupported replacement strings)
+
+  This suggests the team was aware strings might need normalization but
+  it was never implemented for plaintext conversion.
+
+================================================================================
+3. EXISTING MECHANISM TO OVERRIDE PLAIN TEXT
+================================================================================
+
+ANSWER: NO - There is no mechanism for publishers to override or customize
+        the plain text version of newsletters.
+
+GitHub Issue #20015 ("Plain text view"):
+  - URL: https://github.com/TryGhost/Ghost/issues/20015
+  - Requested: Feature to allow editing/viewing plain text before sending
+  - Status: CLOSED as "Not Planned" (May 2024)
+
+The plain text is always auto-generated from HTML with no user control.
+
+================================================================================
+4. RELATED GITHUB ISSUES AND PULL REQUESTS
+================================================================================
+
+DIRECTLY RELATED:
+--------------------------------------------------------------------------------
+PR #24993 - "Added extra spacing after preheader content in emails"
+  URL: https://github.com/TryGhost/Ghost/pull/24993
+  Date: September 2025
+  Status: MERGED
+  Impact: INTRODUCED THIS BUG by adding preheaderSpacing with invisible chars
+  Purpose: Prevent body text from appearing in email preview snippets
+
+ENCODING/FORMATTING ISSUES (FIXED):
+--------------------------------------------------------------------------------
+Issue #22064 - "Email formatting includes visible HTML entities"
+  URL: https://github.com/TryGhost/Ghost/issues/22064
+  Date: January 2025
+  Status: FIXED in v5.108.1+
+  Problem: Characters replaced by visible HTML entity codes (&#xA0;, &#x2019;)
+
+Issue #19733 - "Unnecessary whitespace in plaintext email"
+  URL: https://github.com/TryGhost/Ghost/issues/19733
+  Date: February 2024
+  Status: FIXED via PR #19736
+  Problem: Plaintext emails had excessive leading whitespace
+
+Issue #16549 - "Transactional email encoding problem with apostrophe"
+  URL: https://github.com/TryGhost/Ghost/issues/16549
+  Date: April 2023
+  Status: FIXED
+  Problem: Single quotes encoded as &#39; in email subject lines
+
+Issue #16131 - "Plain text view shows ALL content to free members"
+  URL: https://github.com/TryGhost/Ghost/issues/16131
+  Date: June 2023
+  Status: FIXED
+  Problem: Free members could see paid content in plain text version
+
+FEATURE REQUESTS (NOT IMPLEMENTED):
+--------------------------------------------------------------------------------
+Issue #20015 - "Plain text view"
+  URL: https://github.com/TryGhost/Ghost/issues/20015
+  Date: May 2024
+  Status: CLOSED (Not Planned)
+  Request: Allow editing/viewing plain text version before sending
+
+OTHER RECENT EMAIL-RELATED:
+--------------------------------------------------------------------------------
+PR #27375 - "Fixed email formatting issue with code blocks"
+  Status: Recently merged
+
+PR #27357 - "Fixed RTL languages rendering left-to-right in newsletter emails"
+  Status: Open
+
+================================================================================
+5. CONTENT TYPE HANDLING
+================================================================================
+
+The plain text conversion applies UNIFORMLY to all content types:
+
+  - Standard editor content (paragraphs, headings, lists)
+  - HTML cards
+  - Email-specific cards
+  - Lexical editor content
+  - Legacy Mobiledoc content
+
+The same htmlToPlaintext.email(html) call processes the entire rendered
+email HTML regardless of the original content type.
+
+SEGMENT-SPECIFIC BEHAVIOR:
+  - Free members (segment === 'status:free'):
+    Paid-only content is REMOVED from HTML before plain text conversion
+
+  - Paid members (segment === 'status:-free'):
+    Full content is converted to plain text
+
+================================================================================
+6. RECOMMENDED FIX
+================================================================================
+
+The fix requires changes in TWO repositories:
+
+A. GHOST CORE (this repository):
+--------------------------------------------------------------------------------
+File: ghost/core/core/server/services/email-service/email-templates/template.hbs
+Line: 13
+
+BEFORE:
+  <div style="display:none; max-height:0; overflow:hidden; mso-hide: all;"
+       aria-hidden="true" role="presentation">
+
+AFTER:
+  <div class="preheader-spacing"
+       style="display:none; max-height:0; overflow:hidden; mso-hide: all;"
+       aria-hidden="true" role="presentation">
+
+B. TRYGHOST/SDK (external repository):
+--------------------------------------------------------------------------------
+Repository: https://github.com/TryGhost/SDK
+Package: packages/html-to-plaintext
+File: lib/html-to-plaintext.js
+
+BEFORE:
+  const emailSettings = mergeSettings({
+      selectors: [
+          {selector: 'a', options: {hideLinkHrefIfSameAsText: true}},
+          {selector: '.preheader', format: 'skip'}
+      ]
+  });
+
+AFTER:
+  const emailSettings = mergeSettings({
+      selectors: [
+          {selector: 'a', options: {hideLinkHrefIfSameAsText: true}},
+          {selector: '.preheader', format: 'skip'},
+          {selector: '.preheader-spacing', format: 'skip'}
+      ]
+  });
+
+ALTERNATIVE FIX (Ghost core only):
+--------------------------------------------------------------------------------
+Alternatively, the spacing div could be given class="preheader" to reuse
+the existing selector, though this is semantically less accurate:
+
+  <div class="preheader" style="display:none; ...">
+
+================================================================================
+7. RELEVANT CODE FILES
+================================================================================
+
+CORE EMAIL RENDERING:
+  ghost/core/core/server/services/email-service/EmailRenderer.js
+  ghost/core/core/server/services/email-service/EmailService.js
+  ghost/core/core/server/services/email-service/SendingService.js
+  ghost/core/core/server/services/email-service/MailgunEmailProvider.js
+
+EMAIL TEMPLATES:
+  ghost/core/core/server/services/email-service/email-templates/template.hbs
+  ghost/core/core/server/services/email-service/email-templates/partials/styles.hbs
+  ghost/core/core/server/services/email-service/email-templates/partials/paywall.hbs
+
+EXTERNAL PACKAGES:
+  @tryghost/html-to-plaintext (TryGhost/SDK repository)
+  html-to-text (npm package, version 5.1.1)
+
+TESTS:
+  ghost/core/test/e2e-api/admin/email-previews.test.js
+  ghost/core/test/e2e-api/admin/emails.test.js
+  ghost/core/test/unit/server/services/email-service/email-renderer.test.js
+
+================================================================================
+8. WORKAROUNDS FOR PUBLISHERS
+================================================================================
+
+Currently, there are NO workarounds available to publishers:
+
+  1. Plain text cannot be manually edited or overridden
+  2. The preheader spacing cannot be disabled
+  3. Newsletter settings do not affect plain text generation
+  4. No API endpoint exists to customize plain text content
+
+The only solution is a code fix as described in Section 6.
+
+================================================================================
+END OF FINDINGS
+================================================================================
