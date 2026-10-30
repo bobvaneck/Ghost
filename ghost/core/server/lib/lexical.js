@@ -5,6 +5,7 @@ const config = require('../../shared/config');
 const labs = require('../../shared/labs');
 const settingsCache = require('../../shared/settings-cache');
 const adapterManager = require('../services/adapter-manager').default;
+const { t } = require('../../shared/i18n');
 
 let nodes;
 let lexicalHtmlRenderer;
@@ -63,6 +64,11 @@ function buildRenderOptions(userOptions) {
       feature: {
         emailUniqueid: labs.isSet('emailUniqueid'),
         pictureImageFormats: labs.isSet('pictureImageFormats'),
+      },
+      transistorStrings: {
+        iframeTitle: t('Transistor podcasts'),
+        heading: t('Listen to your podcasts'),
+        description: t('Subscribe and listen to your personal podcast feed in your favorite app.'),
       },
     },
     userOptions,

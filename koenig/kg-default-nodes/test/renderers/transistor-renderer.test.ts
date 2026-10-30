@@ -297,4 +297,38 @@ describe('renderers/transistor-renderer', function () {
             assert.ok(result.html.includes('background-color: #15171A'));
         });
     });
+
+    describe('translatable strings', function () {
+        it('renders the default English strings for web when no transistorStrings are provided', function () {
+            const result = renderForWeb(getTestData());
+
+            assert.ok(result.html.includes('title="Transistor podcasts"'));
+        });
+
+        it('renders the default English strings for email when no transistorStrings are provided', function () {
+            const result = renderForEmail(getTestData());
+
+            assert.ok(result.html.includes('Listen to your podcasts'));
+            assert.ok(result.html.includes('Subscribe and listen to your personal podcast feed in your favorite app.'));
+        });
+
+        it('uses the provided iframe title for web', function () {
+            const result = renderForWeb(getTestData(), {transistorStrings: {iframeTitle: 'Écoutez vos podcasts'}});
+
+            assert.ok(result.html.includes('title="Écoutez vos podcasts"'));
+            assert.ok(!result.html.includes('title="Transistor podcasts"'));
+        });
+
+        it('uses the provided heading and description for email', function () {
+            const result = renderForEmail(getTestData(), {transistorStrings: {
+                heading: 'Écoutez vos podcasts',
+                description: 'Abonnez-vous à votre flux de podcast personnel dans votre application préférée.'
+            }});
+
+            assert.ok(result.html.includes('Écoutez vos podcasts'));
+            assert.ok(result.html.includes('Abonnez-vous à votre flux de podcast personnel dans votre application préférée.'));
+            assert.ok(!result.html.includes('Listen to your podcasts'));
+            assert.ok(!result.html.includes('Subscribe and listen to your personal podcast feed in your favorite app.'));
+        });
+    });
 });

@@ -13,6 +13,19 @@ interface TransistorRenderOptions extends ExportDOMOptions {
         accentColor?: string;
         [key: string]: unknown;
     };
+    transistorStrings?: {
+        iframeTitle?: string;
+        heading?: string;
+        description?: string;
+    };
+}
+
+function resolveStrings(options: TransistorRenderOptions) {
+    return {
+        iframeTitle: options.transistorStrings?.iframeTitle ?? 'Transistor podcasts',
+        heading: options.transistorStrings?.heading ?? 'Listen to your podcasts',
+        description: options.transistorStrings?.description ?? 'Subscribe and listen to your personal podcast feed in your favorite app.'
+    };
 }
 
 export function renderTransistorNode(node: TransistorNodeData, options: TransistorRenderOptions = {}) {
@@ -34,6 +47,7 @@ function setIframeAttributes(iframe: Element) {
 }
 
 function frontendTemplate(node: TransistorNodeData, document: Document, options: TransistorRenderOptions) {
+    const strings = resolveStrings(options);
     const figure = document.createElement('figure');
     figure.setAttribute('class', 'kg-card kg-transistor-card');
 
@@ -46,7 +60,7 @@ function frontendTemplate(node: TransistorNodeData, document: Document, options:
 
     const iframe = document.createElement('iframe');
     setIframeAttributes(iframe);
-    iframe.setAttribute('title', 'Transistor podcasts');
+    iframe.setAttribute('title', strings.iframeTitle);
     iframe.setAttribute('data-src', embedUrl.toString());
     iframe.setAttribute('data-kg-transistor-embed', '');
     figure.appendChild(iframe);
@@ -66,6 +80,8 @@ function frontendTemplate(node: TransistorNodeData, document: Document, options:
 }
 
 function emailTemplate(node: TransistorNodeData, document: Document, options: TransistorRenderOptions) {
+    const strings = resolveStrings(options);
+
     // Use the site accent color from the newsletter/email design settings
     const accentColor = options.design?.accentColor || '#15171A';
 
@@ -91,10 +107,10 @@ function emailTemplate(node: TransistorNodeData, document: Document, options: Tr
                         <tr>
                             <td style="text-align: center;">
                                 <a href="${transistorUrl}" class="kg-transistor-title">
-                                    Listen to your podcasts
+                                    ${strings.heading}
                                 </a>
                                 <a href="${transistorUrl}"  class="kg-transistor-description">
-                                    Subscribe and listen to your personal podcast feed in your favorite app.
+                                    ${strings.description}
                                 </a>
                             </td>
                         </tr>
